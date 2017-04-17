@@ -192,10 +192,10 @@ int main( int argc, char *argv[] )
 								free(msg);
 							} else {
 								// without tag
-								int msg_len = strlen(buf) - 4 + 1;
+								int i, msg_len = strlen(buf) - 4 + 1;
 								memcpy(msg_string, &buf[4], msg_len);
 								msg_string[msg_len] = '\0';
-								for (int i = 0; i < nfds; i++) {
+								for ( i = 0; i < nfds; i++) {
 									if (i != msock && FD_ISSET(i, &afds) && registered_to_all[i])
 										write( i, buf, strlen(buf));
 								}
@@ -235,10 +235,10 @@ int main( int argc, char *argv[] )
 								free(msg);
 							} else {
 								// without tag
-								int msg_len = strlen(buf) - 5 + 1;
+								int i, msg_len = strlen(buf) - 5 + 1;
 								memcpy(msg_string, &buf[5], msg_len);
 								msg_string[msg_len] = '\0';
-								for (int i = 0; i < nfds; i++) {
+								for (i = 0; i < nfds; i++) {
 									if (i != msock && FD_ISSET(i, &afds) && registered_to_all[i])
 										write( i, buf, strlen(buf));
 								}
@@ -279,7 +279,7 @@ void send_message(MSG *msg) {
         cur = cur -> next;
     }
 
-	for (int i = 0; i < nfds; i++)
+	for (i = 0; i < nfds; i++)
 		if (registered_to_all[i] == 1)
 			write ( i, whole, strlen(whole));
 }
@@ -313,7 +313,7 @@ void send_message_encrypted(MSG *msg) {
         cur = cur -> next;
     }
 
-	for (int i = 0; i < nfds; i++)
+	for (i = 0; i < nfds; i++)
 		if (registered_to_all[i] == 1)
 			write ( i, whole, strlen(whole));
 }

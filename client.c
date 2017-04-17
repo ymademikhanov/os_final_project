@@ -39,9 +39,6 @@ int main( int argc, char *argv[] )
 	char		*service;
 	char		*host = "localhost";
 
-
-
-
 	pthread_t listen_to_user_thread, listen_to_server_thread;
 
 	switch( argc ) {
@@ -290,29 +287,26 @@ void *listen_to_server( void *ign ) {
 	pthread_exit( NULL );
 }
 
-void num2str(int x, char *str) {
-	int copyx = x, d = 1;
-	while (copyx) {
+void num2str(int num, char *str) {
+	int num2 = num, d = 1, counter = 0;
+	while (num2) {
 		d *= 10;
-		copyx /= 10;
+		num2 /= 10;
 	}
-	int counter = 0;
 	d /= 10;
-	while (x && d > 0) {
-		str[counter++] = (x / d) + 48;
-		x %= d;
+	while (num && d) {
+		str[counter++] = (num / d) + 48;
+		num %= d;
 		d /= 10;
 	}
 	str[counter] = '\0';
 }
 
-
 // Key Scheduling Algorithm
 // Input: state - the state used to generate the keystream
 //        key - Key to use to initialize the state
 //        len - length of key in bytes
-void ksa(unsigned char* state, unsigned char* key, int len)
-{
+void ksa(unsigned char* state, unsigned char* key, int len) {
    int i,j=0,t;
 
    for (i=0; i < 256; ++i)
@@ -329,8 +323,7 @@ void ksa(unsigned char* state, unsigned char* key, int len)
 // Input: state - the state used to generate the keystream
 //        out - Must be of at least "len" length
 //        len - number of bytes to generate
-void prga(unsigned char* state, unsigned char* out, int len)
-{
+void prga(unsigned char* state, unsigned char* out, int len) {
    int i=0,j=0,x,t;
 
    for (x=0; x < len; ++x)  {
