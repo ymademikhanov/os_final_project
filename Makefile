@@ -11,17 +11,17 @@ C_SRCS		= \
 		passivesock.c \
 		connectsock.c \
 		client.c \
-		selectechoserver.c
+		server.c
 
 SOURCE          = ${C_SRCS}
 
 OBJS            = ${SOURCE:.c=.o}
 
-EXEC		= client selectechoserver
+EXEC		= client server
 
 .SUFFIXES       :       .o .c .h
 
-all		:	library client selectechoserver
+all		:	library client server
 
 .c.o            :	${SOURCE}
 			@echo "    Compiling $< . . .  "
@@ -30,8 +30,8 @@ all		:	library client selectechoserver
 library		:	passivesock.o connectsock.o
 			ar rv libsocklib.a passivesock.o connectsock.o
 
-selectechoserver	:	selectechoserver.o
-			${LINK} $@ selectechoserver.o ${LIBS}
+server	:	server.o
+			${LINK} $@ server.o ${LIBS}
 
 client		:	client.o
 			${LINK} $@ client.o ${LIBS}

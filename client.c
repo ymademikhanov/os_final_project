@@ -142,7 +142,8 @@ void *listen_to_user( void *ign ) {
 
 							for (j = 0; j < msglen; j++)
 								final_message[counter++] = enc[j];
-							final_message[counter] = '\0';
+
+							printf("%s\n", final_message);
 							write(sockets[i], final_message, counter);
 							free(enc);
 							free(out);
@@ -182,8 +183,9 @@ void *listen_to_user( void *ign ) {
 
 							for (j = 0; j < msglen; j++)
 								final_message[counter++] = enc[j];
-							final_message[counter] = '\0';
 
+
+							printf("%s\n", final_message);
 							write(sockets[i], final_message, counter);
 							free(enc);
 							free(out);
@@ -216,7 +218,9 @@ void *listen_to_server( void *ign ) {
             close(csock);
             break;
         } else {
+			printf("%c\n", buf[cc]);
             buf[cc] = '\0';
+
 			memcpy(command, &buf[0], 4);
 			command[4] = '\0';
 			if (strcmp(command, "MSGE") == 0) {
