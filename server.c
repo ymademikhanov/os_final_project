@@ -58,7 +58,7 @@ typedef struct Msg {
 } MSG;
 
 TAG     *tags = NULL;
-int     *registerAll;
+int     *registerAll, *busy;
 int	    nfds;
 char    tag[BUFSIZE];
 char    msg[BUFSIZE];
@@ -70,6 +70,8 @@ void handleRequest(int ID, char *buf);
 void registerTag(int ID, char *tag);
 void deregisterTag(int ID, char *tag);
 void registerUser(int ID, TAG *tag);
+void sendMessage(char *tag, char *buf);
+
 
 /* 	The server ... */
 int main( int argc, char *argv[] )
@@ -109,6 +111,7 @@ int main( int argc, char *argv[] )
 	FD_SET( msock, &afds );
 
     registerAll = (int*) calloc(nfds, sizeof(int));
+    busy = (int*) calloc(nfds, sizeof(int));
 
 	for (;;) {
 		memcpy((char *)&rfds, (char *)&afds, sizeof(rfds));
@@ -132,21 +135,24 @@ int main( int argc, char *argv[] )
 
 		/*	Handle the participants requests  */
 		for ( fd = 0; fd < nfds; fd++ ) {
-			if (fd != msock && FD_ISSET(fd, &rfds) ) {
+			if (fd != msock && FD_ISSET(fd, &rfds)) {
 				printf("%d\n", fd);
-				if ( ( cc = read( fd, buf, BUFSIZE ) ) <= 0 ) {
-					printf( "The client has gone.\n" );
-					(void) close(fd);
-					FD_CLR( fd, &afds );
-				} else {
-                    buf[cc - 1] = '\0';
-                    /*
-                        ^^^^^^^^^^^^^
-                        check-out above line
-                    */
-					// processing requests from user
-                    handleRequest(fd, buf);
-				}
+                if (!busy[fd]) {
+                    if ( ( cc = read( fd, buf, BUFSIZE ) ) <= 0 ) {
+                        printf( "The client has gone.\n" );
+                        (void) close(fd);
+                        FD_CLR( fd, &afds );
+                    } else {
+                        buf[cc - 1] = '\0';
+                        /*
+                            ^^^^^^^^^^^^^
+                            check-out above line
+                        */
+                        // processing requests from user
+
+                        handleRequest(fd, buf);
+                    }
+                }
 			}
 		}
 	}
@@ -154,16 +160,18 @@ int main( int argc, char *argv[] )
 
 
 void handleRequest(int id, char *buf) {
-    int taglen;
+    int taglen = 0, j;
+
     if (MSG_CHECK) {
-        // this may need a background execution
-
-    } else if (MSGE_CHECK) {
-        // this may need a background execution
-
-    } else if (IMAGE_CHECK) {
-        // this may need a background execution
-
+        if (buf[4] == '#') {
+            j = 5;
+            for (; j < strlen(buf) && buf[j] != ' '; j++)
+                tag[taglen++] = buf[j];
+            tag[taglen] = '\0';
+            sendMessage(tag, buf);
+        } else {
+            sendMessage(NULL, buf);
+        }
     } else if (REGISTERALL_CHECK) {
         deregisterTag(id, "DEREGISTERALL");
         registerAll[id] = true;
@@ -180,6 +188,11 @@ void handleRequest(int id, char *buf) {
         memcpy(tag, &buf[11], taglen);
         tag[taglen] = '\0';
         deregisterTag(id, tag);
+    } else {
+        // these may need a background execution
+        if (MSGE_CHECK) {
+
+        }
     }
 }
 
@@ -201,6 +214,25 @@ void registerTag(int ID, char *tag) {
         prev -> next = node;
     } else {
         tags = node;
+    }
+}
+
+void sendMessage(char *tag, char *buf) {
+    TAG *cur = tags;
+    int i;
+
+    for (; cur != NULL; cur = cur -> next) {
+        if (!strcmp(cur -> tag, tag)) {
+            // sending message to all users with such tag
+            USER *curID = cur -> users;
+            for (; curID != NULL; curID = curID -> next)
+                write ( curID -> ID, buf, strlen(buf));
+        }
+    }
+
+    for (i = 0; i < nfds; i++) {
+        if (registerAll[i] == 1)
+            write ( i, buf, strlen(buf));
     }
 }
 
@@ -234,10 +266,10 @@ void registerUser(int ID, TAG *tag) {
     }
     USER *node = createUser(ID);
 
-    if (prev == NULL)
+    if (prev == NULL) {
         tag -> users = node;
-    else
+    } else {
         prev -> next = node;
-
+    }
     // printf("%d registered to tag %s\n", node -> id, tag -> tag);
 }
