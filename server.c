@@ -182,6 +182,7 @@ void handleRequest(int id, char *buf) {
         taglen = (int)strlen(buf) - 9;
         memcpy(tag, &buf[9], taglen);
         tag[taglen] = '\0';
+        printf("%s\n", tag);
         registerTag(id, tag);
     } else if (DEREGISTER_CHECK) {
         taglen = (int)strlen(buf) - 11;
