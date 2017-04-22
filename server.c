@@ -11,7 +11,7 @@
 #include <pthread.h>
 
 #define	QLEN			5
-#define	BUFSIZE			4096
+#define	BUFSIZE			2048
 
 #define true            1
 #define false           0
@@ -19,7 +19,7 @@
 #define MSG_CHECK (buf[0] == 'M' && buf[3] == ' ')
 #define MSGE_CHECK (buf[0] == 'M' && buf[3] == 'E')
 #define IMAGE_CHECK (buf[0] == 'I' && buf[4] == 'E')
-#define REGISTER_CHECK (buf[0] == 'R' && buf[0] == ' ')
+#define REGISTER_CHECK (buf[0] == 'R' && buf[8] == ' ')
 #define DEREGISTER_CHECK (buf[0] == 'D' && buf[10] == ' ')
 #define REGISTERALL_CHECK (buf[0] == 'R' && buf[8] == 'A')
 #define DEREGISTERALL_CHECK (buf[0] == 'D' && buf[10] == 'A')
@@ -35,6 +35,36 @@ typedef struct Tag {
     USER *users;
     struct Tag *next;
 } TAG;
+
+typedef struct longRequest {
+    char *buf;
+    int ID;
+    int len;
+} LONGREQUEST;
+
+typedef struct longwrite {
+    char *buf;
+    int ID;
+    int len;
+} LONGWRITE;
+
+
+LONGWRITE* createLongWrite(int ID, char *buf, int len) {
+    LONGWRITE *longwrite = (LONGWRITE*) malloc(sizeof(LONGWRITE));
+    longwrite -> ID = ID;
+    longwrite -> buf = buf;
+    longwrite -> len = len;
+    return longwrite;
+}
+
+LONGREQUEST* createLongRequest(int ID, char *buf, int len) {
+    LONGREQUEST *req = (LONGREQUEST*) malloc(sizeof(LONGREQUEST));
+    req -> ID = ID;
+    req -> len = len;
+    req -> buf = (char*) malloc(sizeof(char) * len);
+    strcpy(req -> buf, buf);
+    return req;
+}
 
 TAG* createTag(char *tag) {
     TAG *node = (TAG*) malloc(sizeof(TAG));
@@ -52,26 +82,29 @@ USER* createUser(int ID) {
     return node;
 }
 
-typedef struct Msg {
-	char *tag;
-	char *msg;
-} MSG;
+int min(int a, int b) {
+    if (a > b)
+        return b;
+    return a;
+}
 
 TAG     *tags = NULL;
 int     *registerAll, *busy;
 int	    nfds;
-char    tag[BUFSIZE];
-char    msg[BUFSIZE];
 
 int passivesock( char *service, char *protocol, int qlen, int *rport );
 
 // Supporting functions
-void handleRequest(int ID, char *buf);
+void handleRequest(int ID, char *buf, int cc);
 void registerTag(int ID, char *tag);
 void deregisterTag(int ID, char *tag);
 void registerUser(int ID, TAG *tag);
 void sendMessage(char *tag, char *buf);
 
+pthread_t heavyRequestThread;
+pthread_t *threads;
+pthread_mutex_t *mutexex;
+void *handleHeavyRequest(void *ign);
 
 /* 	The server ... */
 int main( int argc, char *argv[] )
@@ -111,7 +144,13 @@ int main( int argc, char *argv[] )
 	FD_SET( msock, &afds );
 
     registerAll = (int*) calloc(nfds, sizeof(int));
+    threads = (pthread_t*) calloc(nfds, sizeof(pthread_t));
+    mutexes = (pthread_mutex_t*) calloc(nfds, sizeof(pthread_mutex_t));
     busy = (int*) calloc(nfds, sizeof(int));
+
+    int mi;
+    for (mi = 0; mi < nfds; mi++)
+        mutexes[mi] = PTHREAD_MUTEX_INITIALIZER;
 
 	for (;;) {
 		memcpy((char *)&rfds, (char *)&afds, sizeof(rfds));
@@ -143,14 +182,16 @@ int main( int argc, char *argv[] )
                         (void) close(fd);
                         FD_CLR( fd, &afds );
                     } else {
-                        buf[cc - 1] = '\0';
-                        /*
-                            ^^^^^^^^^^^^^
-                            check-out above line
-                        */
+                        // adjusting requests from different clients
+                        if (buf[cc - 2] != '\r') {
+                            buf[cc - 1] = '\r';
+                            buf[cc] = '\n';
+                            buf[cc + 1] = '\0';
+                        } else
+                        if (buf[cc - 1] == '\n' && buf[cc - 2] != '\r')
+                            buf[cc - 1] = '\0';
                         // processing requests from user
-
-                        handleRequest(fd, buf);
+                        handleRequest(fd, buf, cc);
                     }
                 }
 			}
@@ -158,43 +199,137 @@ int main( int argc, char *argv[] )
 	}
 }
 
-
-void handleRequest(int id, char *buf) {
-    int taglen = 0, j;
-
-    if (MSG_CHECK) {
-        if (buf[4] == '#') {
-            j = 5;
-            for (; j < strlen(buf) && buf[j] != ' '; j++)
-                tag[taglen++] = buf[j];
-            tag[taglen] = '\0';
-            sendMessage(tag, buf);
-        } else {
-            sendMessage(NULL, buf);
-        }
-    } else if (REGISTERALL_CHECK) {
+void handleRequest(int id, char *buf, int cc) {
+    if (REGISTERALL_CHECK) {
         deregisterTag(id, "DEREGISTERALL");
         registerAll[id] = true;
     } else if (DEREGISTERALL_CHECK) {
         deregisterTag(id, "DEREGISTERALL");
         registerAll[id] = false;
     } else if (REGISTER_CHECK) {
-        taglen = (int)strlen(buf) - 9;
+        int taglen = (int)strlen(buf) - 9;
         memcpy(tag, &buf[9], taglen);
         tag[taglen] = '\0';
-        printf("%s\n", tag);
+        printf("%s#\n", tag);
         registerTag(id, tag);
     } else if (DEREGISTER_CHECK) {
-        taglen = (int)strlen(buf) - 11;
+        int taglen = (int)strlen(buf) - 11;
         memcpy(tag, &buf[11], taglen);
         tag[taglen] = '\0';
         deregisterTag(id, tag);
     } else {
+        // MSG, MSGE and IMAGE with tag or without tag
         // these may need a background execution
-        if (MSGE_CHECK) {
+        LONGREQUEST *req = createLongRequest(id, buf, cc);
+        pthread_create( &heavyRequestThread, NULL, handleHeavyRequest, (void*) &req );
+    }
+}
 
+void *handleHeavyRequest(void *ign) {
+    LONGREQUEST *req = *((LONGREQUEST**) req);
+    char    buf[BUFSIZE];
+    char    tag[BUFSIZE];
+    char    *msg;
+
+    int     taglen;
+    int     msglen;
+    int     bytecount = 0;
+    int     buflen;
+    int     i, pos, cc;
+    int     ID = req -> ID;
+
+    for (i = 0; i < req -> len; i++)
+        buf[i] = req -> buf[i];
+
+    if (MSG_CHECK) {
+        pos = 4;
+        if (buf[pos] == '#') {
+            for (pos = pos + 1; buf[pos] != ' '; pos++)
+                tag[taglen++] = buf[pos];
+            tag[taglen] = '\0';
+        } else {
+            tag = NULL;
+        }
+        msg = (char*) malloc(strlen(buf) * sizeof(char));
+        strcpy(msg, buf);
+    } else {
+        int shift = 0; // shift due to #
+        if (IMAGE_CHECK)
+            pos = 6;
+        else
+            pos = 5;
+        if (buf[pos] == '#') {
+            // extracting tag
+            for (pos = pos + 1; buf[pos] != ' '; pos++)
+                tag[taglen++] = buf[pos];
+            tag[taglen] = '\0';
+            shift = 1;
+        } else {
+            tag = NULL;
+        }
+
+        // extracing bytecount
+        for (pos = pos + shift; buf[pos] != '/'; pos++)
+            bytecount = bytecount * 10 + (int) (buf[pos] - '0');
+
+        msg = (char*) malloc((j + bytecount) * sizeof(char));
+        for (i = 0; i <= pos; i++)
+            msg[i] = buf[i];
+
+        int last = bytecount;
+        while ( (cc = read( ID, buf, min(BUFSIZE, last))) > 0 ) {
+            for (j = 0; j < cc; j++) {
+                msg[i++] = buf[j];
+            }
         }
     }
+
+    msglen = i;
+
+
+    /*
+        extracted tag and message from requests
+        sending to users
+    */
+
+    if (tag != NULL) {
+        TAG *cur = tags;
+
+        for (; cur != NULL; cur = cur -> next) {
+            printf("%s\n", cur -> tag);
+            if (!strcmp(cur -> tag, tag)) {
+                // sending message to all users with such tag
+                USER *curID = cur -> users;
+                for (; curID != NULL; curID = curID -> next) {
+                    LONGWRITE *longwrite = createLongWrite(curID -> ID, msg, i);
+                    pthread_create(&threads[cur -> ID], NULL, writeLong, (void*) &longwrite);
+
+                }
+            }
+        }
+    }
+
+    for (i = 0; i < nfds; i++) {
+        if (registerAll[i] == 1)
+            write ( i, buf, strlen(buf));
+    }
+
+
+    free(req -> buf);
+    free(req);
+    pthread_exit(NULL);
+}
+
+
+void *writeLong(void *ign) {
+    LONGWRITE *longwrite = *((LONGREQUEST**) req);
+
+    // mutex on
+
+    write ( longwrite -> ID, longwrite -> buf, longwrite -> len);
+
+    // mutex off
+
 }
 
 void registerTag(int ID, char *tag) {
@@ -215,25 +350,6 @@ void registerTag(int ID, char *tag) {
         prev -> next = node;
     } else {
         tags = node;
-    }
-}
-
-void sendMessage(char *tag, char *buf) {
-    TAG *cur = tags;
-    int i;
-
-    for (; cur != NULL; cur = cur -> next) {
-        if (!strcmp(cur -> tag, tag)) {
-            // sending message to all users with such tag
-            USER *curID = cur -> users;
-            for (; curID != NULL; curID = curID -> next)
-                write ( curID -> ID, buf, strlen(buf));
-        }
-    }
-
-    for (i = 0; i < nfds; i++) {
-        if (registerAll[i] == 1)
-            write ( i, buf, strlen(buf));
     }
 }
 

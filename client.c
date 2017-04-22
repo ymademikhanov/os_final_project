@@ -11,7 +11,7 @@
 #include <semaphore.h>
 
 
-#define BUFSIZE		4096
+#define BUFSIZE		2048
 #define LOADSIZE 1
 
 _Bool alive = 1;
@@ -218,9 +218,7 @@ void *listen_to_server( void *ign ) {
             close(csock);
             break;
         } else {
-			printf("%c\n", buf[cc]);
             buf[cc] = '\0';
-
 			memcpy(command, &buf[0], 4);
 			command[4] = '\0';
 			if (strcmp(command, "MSGE") == 0) {
