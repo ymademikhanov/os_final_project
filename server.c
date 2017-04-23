@@ -11,7 +11,7 @@
 #include <pthread.h>
 
 #define	QLEN			5
-#define	BUFSIZE			30
+#define	BUFSIZE			2048
 
 #define true            1
 #define false           0
@@ -49,16 +49,25 @@ typedef struct longwrite {
 } LONGWRITE;
 
 
+// optimized
 LONGWRITE* createLongWrite(int ID, char *buf, int len) {
     LONGWRITE *longwrite = (LONGWRITE*) malloc(sizeof(LONGWRITE));
     longwrite -> ID = ID;
-    longwrite -> buf = (char*) malloc(sizeof(char) * len);
     longwrite -> len = len;
-    int i;
-    for (i = 0; i < len; i++)
-        longwrite -> buf[i] = buf[i];
+    longwrite -> buf = buf;
     return longwrite;
 }
+
+// LONGWRITE* createLongWrite(int ID, char *buf, int len) {
+//     LONGWRITE *longwrite = (LONGWRITE*) malloc(sizeof(LONGWRITE));
+//     longwrite -> ID = ID;
+//     longwrite -> buf = (char*) malloc(sizeof(char) * len);
+//     longwrite -> len = len;
+//     int i;
+//     for (i = 0; i < len; i++)
+//         longwrite -> buf[i] = buf[i];
+//     return longwrite;
+// }
 
 LONGREQUEST* createLongRequest(int ID, char *buf, int len) {
     LONGREQUEST *req = (LONGREQUEST*) malloc(sizeof(LONGREQUEST));
@@ -192,7 +201,6 @@ int main( int argc, char *argv[] )
 			if (fd != msock && FD_ISSET(fd, &rfds)) {
                 if (busy[fd] == false) {
                     printf("not bysy fd is %d\n", fd);
-                    busy[fd] = true;
                     if ( ( cc = read( fd, buf, BUFSIZE ) ) <= 0 ) {
                         printf( "The client has gone.\n" );
                         (void) close(fd);
@@ -209,31 +217,27 @@ int main( int argc, char *argv[] )
 }
 
 void handleRequest(int id, char *buf, int cc) {
-
     if (REGISTERALL_CHECK) {
         deregisterTag(id, "DEREGISTERALL");
         registerAll[id] = true;
-        busy[id] = false;
     } else if (DEREGISTERALL_CHECK) {
         deregisterTag(id, "DEREGISTERALL");
         registerAll[id] = false;
-        busy[id] = false;
     } else if (REGISTER_CHECK) {
         int taglen = cc - 9 - 2;
         memcpy(tag, &buf[9], taglen);
         tag[taglen] = '\0';
         registerTag(id, tag);
-        busy[id] = false;
     } else if (DEREGISTER_CHECK) {
         int taglen = cc - 11 - 2;
         memcpy(tag, &buf[11], taglen);
         tag[taglen] = '\0';
         deregisterTag(id, tag);
-        busy[id] = false;
     } else
     if (MSG_CHECK || MSGE_CHECK || IMAGE_CHECK) {
         // MSG, MSGE and IMAGE with tag or without tag
         // these may need a background execution
+        busy[id] = true;
         LONGREQUEST *req = createLongRequest(id, buf, cc);
         pthread_create( &heavyRequestThread, NULL, handleHeavyRequest, (void*) &req );
     }
@@ -254,6 +258,8 @@ void *handleHeavyRequest(void *ign) {
     for (i = 0; i < req -> len; i++)
         buf[i] = req -> buf[i];
 
+    // printf("request length %d\n", req -> len);
+
     if (MSG_CHECK) {
         pos = 4;
         if (buf[pos] == '#') {
@@ -263,10 +269,13 @@ void *handleHeavyRequest(void *ign) {
         } else {
             tag = NULL;
         }
-        msg = (char*) malloc(strlen(buf + 1) * sizeof(char));
-        strcpy(msg, buf);
-        msglen = strlen(buf);
-        msg[msglen] = '\0';
+        msg = (char*) malloc(req -> len * sizeof(char));
+        msglen = req -> len;
+        int qq;
+        for (qq = 0; qq < msglen; qq++) {
+            msg[qq] = buf[qq];
+        }
+
     } else {
         int shift = 0; // shift due to #
         if (IMAGE_CHECK)
@@ -300,21 +309,18 @@ void *handleHeavyRequest(void *ign) {
 
         int last = bytecount - notbytecount;
         while ( last > 0 ) {
-
             int cc = read( ID, buf, min(BUFSIZE, last));
             for (j = 0; j < cc; j++)
                 msg[i++] = buf[j];
             last -= cc;
         }
-
-        busy[ID] = false;
-
         msglen = i;
     }
 
-
-    printf("after reading fully %d\n", msglen);
-    fflush(stdout);
+    busy[ID] = false;
+    //
+    // printf("after reading fully %d\n", msglen);
+    // fflush(stdout);
 
     /*
         extracted tag and message from requests
@@ -345,9 +351,9 @@ void *handleHeavyRequest(void *ign) {
     }
 
     free(req -> buf);
+    free(req);
     free(msg);
     free(tag);
-    free(req);
     pthread_exit(NULL);
 }
 
