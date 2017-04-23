@@ -366,7 +366,6 @@ void *writeLong(void *ign) {
     pthread_mutex_lock(&mutexes[ID]);
 
     write ( ID, longwrite -> buf, longwrite -> len);
-    free(longwrite -> buf);
     free(longwrite);
 
     // mutex off
