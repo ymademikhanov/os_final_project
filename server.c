@@ -52,7 +52,10 @@ typedef struct longwrite {
 LONGWRITE* createLongWrite(int ID, char *buf, int len) {
     LONGWRITE *longwrite = (LONGWRITE*) malloc(sizeof(LONGWRITE));
     longwrite -> ID = ID;
-    longwrite -> buf = buf;
+    longwrite -> buf = (char*) malloc(sizeof(char) * len);
+    int i;
+    for (i = 0; i < len; i++)
+        longwrite -> buf[i] = buf[i];
     longwrite -> len = len;
     return longwrite;
 }
@@ -62,7 +65,9 @@ LONGREQUEST* createLongRequest(int ID, char *buf, int len) {
     req -> ID = ID;
     req -> len = len;
     req -> buf = (char*) malloc(sizeof(char) * len);
-    strcpy(req -> buf, buf);
+    int i;
+    for (i = 0; i < len; i++)
+        req -> buf[i] = buf[i];
     return req;
 }
 
@@ -100,10 +105,12 @@ void registerTag(int ID, char *tag);
 void deregisterTag(int ID, char *tag);
 void registerUser(int ID, TAG *tag);
 void sendMessage(char *tag, char *buf);
+void *writeLong(void *ign);
 
 pthread_t heavyRequestThread;
 pthread_t *threads;
-pthread_mutex_t *mutexex;
+pthread_mutex_t *mutexes;
+char tag[BUFSIZE];
 void *handleHeavyRequest(void *ign);
 
 /* 	The server ... */
@@ -150,7 +157,7 @@ int main( int argc, char *argv[] )
 
     int mi;
     for (mi = 0; mi < nfds; mi++)
-        mutexes[mi] = PTHREAD_MUTEX_INITIALIZER;
+        pthread_mutex_init(&mutexes[mi], NULL);
 
 	for (;;) {
 		memcpy((char *)&rfds, (char *)&afds, sizeof(rfds));
@@ -226,16 +233,15 @@ void handleRequest(int id, char *buf, int cc) {
 }
 
 void *handleHeavyRequest(void *ign) {
-    LONGREQUEST *req = *((LONGREQUEST**) req);
+    LONGREQUEST *req = *((LONGREQUEST**) ign);
     char    buf[BUFSIZE];
-    char    tag[BUFSIZE];
+    char    *tag = (char*) calloc(BUFSIZE, sizeof(char));
     char    *msg;
-
     int     taglen;
     int     msglen;
     int     bytecount = 0;
     int     buflen;
-    int     i, pos, cc;
+    int     i, j, pos, cc;
     int     ID = req -> ID;
 
     for (i = 0; i < req -> len; i++)
@@ -250,14 +256,17 @@ void *handleHeavyRequest(void *ign) {
         } else {
             tag = NULL;
         }
-        msg = (char*) malloc(strlen(buf) * sizeof(char));
+        msg = (char*) malloc(strlen(buf + 1) * sizeof(char));
         strcpy(msg, buf);
+        msglen = strlen(buf);
+        msg[msglen] = '\0';
     } else {
         int shift = 0; // shift due to #
         if (IMAGE_CHECK)
             pos = 6;
         else
             pos = 5;
+
         if (buf[pos] == '#') {
             // extracting tag
             for (pos = pos + 1; buf[pos] != ' '; pos++)
@@ -272,7 +281,7 @@ void *handleHeavyRequest(void *ign) {
         for (pos = pos + shift; buf[pos] != '/'; pos++)
             bytecount = bytecount * 10 + (int) (buf[pos] - '0');
 
-        msg = (char*) malloc((j + bytecount) * sizeof(char));
+        msg = (char*) malloc((pos + bytecount) * sizeof(char));
         for (i = 0; i <= pos; i++)
             msg[i] = buf[i];
 
@@ -282,9 +291,17 @@ void *handleHeavyRequest(void *ign) {
                 msg[i++] = buf[j];
             }
         }
-    }
+        msglen = i;
 
-    msglen = i;
+        printf("DEBUG\n");
+        fflush(stdout);
+        int qq;
+        for (qq = 0; qq < msglen; qq++) {
+            printf("%c", msg[qq]);
+            fflush(stdout);
+        }
+
+    }
 
 
     /*
@@ -296,39 +313,49 @@ void *handleHeavyRequest(void *ign) {
         TAG *cur = tags;
 
         for (; cur != NULL; cur = cur -> next) {
-            printf("%s\n", cur -> tag);
             if (!strcmp(cur -> tag, tag)) {
                 // sending message to all users with such tag
                 USER *curID = cur -> users;
                 for (; curID != NULL; curID = curID -> next) {
-                    LONGWRITE *longwrite = createLongWrite(curID -> ID, msg, i);
-                    pthread_create(&threads[cur -> ID], NULL, writeLong, (void*) &longwrite);
-
+                    LONGWRITE *longwrite = createLongWrite(curID -> ID, msg, msglen);
+                    pthread_create( &threads[curID -> ID], NULL, writeLong, (void*) &longwrite );
+                    pthread_join( threads[curID -> ID], NULL );
                 }
             }
         }
     }
 
     for (i = 0; i < nfds; i++) {
-        if (registerAll[i] == 1)
-            write ( i, buf, strlen(buf));
+        if (registerAll[i] == 1) {
+            LONGWRITE *longwrite = createLongWrite(i, msg, msglen);
+            printf("%s\n", longwrite -> buf);
+            pthread_create( &threads[i], NULL, writeLong, (void*) &longwrite);
+            pthread_join( threads[i], NULL );
+        }
     }
 
-
     free(req -> buf);
+    free(msg);
+    free(tag);
     free(req);
     pthread_exit(NULL);
 }
 
 
 void *writeLong(void *ign) {
-    LONGWRITE *longwrite = *((LONGREQUEST**) req);
+    LONGWRITE *longwrite = *((LONGWRITE**) ign);
+
+    int ID = longwrite -> ID;
 
     // mutex on
+    pthread_mutex_lock(&mutexes[ID]);
 
-    write ( longwrite -> ID, longwrite -> buf, longwrite -> len);
+    write ( ID, longwrite -> buf, longwrite -> len);
+    free(longwrite -> buf);
+    free(longwrite);
 
     // mutex off
+    pthread_mutex_unlock(&mutexes[ID]);
 
 }
 

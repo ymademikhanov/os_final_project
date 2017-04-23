@@ -282,7 +282,6 @@ void *listen_to_server( void *ign ) {
 				for (i = 4; i < strlen(buf); i++)
 					printf("%c", buf[i]);
 			}
-			printf("\n");
 		}
 	}
 
