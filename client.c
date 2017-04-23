@@ -116,7 +116,8 @@ void *listen_to_user( void *ign ) {
 							// message w/o tag
 							int j;
 							char message[BUFSIZE];
-							int msglen = strlen(buf) - 5;
+
+							int msglen = strlen(buf) - 5 - 1;
 							unsigned char state[256];
 							unsigned char *out = (char*) malloc(sizeof(char) * msglen);
 							unsigned char *enc = (char*) malloc(sizeof(char) * msglen);
@@ -143,7 +144,6 @@ void *listen_to_user( void *ign ) {
 							for (j = 0; j < msglen; j++)
 								final_message[counter++] = enc[j];
 
-							printf("%s\n", final_message);
 							write(sockets[i], final_message, counter);
 							free(enc);
 							free(out);
@@ -160,7 +160,7 @@ void *listen_to_user( void *ign ) {
 
 							final_message[counter++] = ' ';
 
-							int msglen = strlen(buf) - counter;
+							int msglen = strlen(buf) - counter - 1;
 							unsigned char state[256];
 							unsigned char *out = (char*) malloc(sizeof(char) * msglen);
 							unsigned char *enc = (char*) malloc(sizeof(char) * msglen);
@@ -184,17 +184,15 @@ void *listen_to_user( void *ign ) {
 							for (j = 0; j < msglen; j++)
 								final_message[counter++] = enc[j];
 
-
-							printf("%s\n", final_message);
 							write(sockets[i], final_message, counter);
 							free(enc);
 							free(out);
 						}
-					} else
-					if ( write( sockets[i], buf, strlen(buf) ) < 0 ) {
-						// Send to the server
-						fprintf( stderr, "client write: %s\n", strerror(errno) );
-						exit( -1 );
+					} else {
+						int cc = strlen(buf);
+						buf[cc - 1] = '\r';
+						buf[cc] = '\n';
+						write( sockets[i], buf, cc + 1 );
 					}
 				}
 			}

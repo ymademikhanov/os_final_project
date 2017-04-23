@@ -11,7 +11,7 @@
 #include <pthread.h>
 
 #define	QLEN			5
-#define	BUFSIZE			2048
+#define	BUFSIZE			30
 
 #define true            1
 #define false           0
@@ -53,10 +53,10 @@ LONGWRITE* createLongWrite(int ID, char *buf, int len) {
     LONGWRITE *longwrite = (LONGWRITE*) malloc(sizeof(LONGWRITE));
     longwrite -> ID = ID;
     longwrite -> buf = (char*) malloc(sizeof(char) * len);
+    longwrite -> len = len;
     int i;
     for (i = 0; i < len; i++)
         longwrite -> buf[i] = buf[i];
-    longwrite -> len = len;
     return longwrite;
 }
 
@@ -112,6 +112,14 @@ pthread_t *threads;
 pthread_mutex_t *mutexes;
 char tag[BUFSIZE];
 void *handleHeavyRequest(void *ign);
+
+void print(char *buf, int len) {
+    int i;
+    printf("DEBUG:\n");
+    for (i = 0; i < len; i++)
+        printf("%c", buf[i]);
+    printf("#\n");
+}
 
 /* 	The server ... */
 int main( int argc, char *argv[] )
@@ -182,22 +190,16 @@ int main( int argc, char *argv[] )
 		/*	Handle the participants requests  */
 		for ( fd = 0; fd < nfds; fd++ ) {
 			if (fd != msock && FD_ISSET(fd, &rfds)) {
-				printf("%d\n", fd);
-                if (!busy[fd]) {
+                if (busy[fd] == false) {
+                    printf("not bysy fd is %d\n", fd);
+                    busy[fd] = true;
                     if ( ( cc = read( fd, buf, BUFSIZE ) ) <= 0 ) {
                         printf( "The client has gone.\n" );
                         (void) close(fd);
                         FD_CLR( fd, &afds );
                     } else {
-                        // adjusting requests from different clients
-                        if (buf[cc - 2] != '\r') {
-                            buf[cc - 1] = '\r';
-                            buf[cc] = '\n';
-                            buf[cc + 1] = '\0';
-                        } else
-                        if (buf[cc - 1] == '\n' && buf[cc - 2] != '\r')
-                            buf[cc - 1] = '\0';
                         // processing requests from user
+                        print(buf, cc);
                         handleRequest(fd, buf, cc);
                     }
                 }
@@ -207,24 +209,29 @@ int main( int argc, char *argv[] )
 }
 
 void handleRequest(int id, char *buf, int cc) {
+
     if (REGISTERALL_CHECK) {
         deregisterTag(id, "DEREGISTERALL");
         registerAll[id] = true;
+        busy[id] = false;
     } else if (DEREGISTERALL_CHECK) {
         deregisterTag(id, "DEREGISTERALL");
         registerAll[id] = false;
+        busy[id] = false;
     } else if (REGISTER_CHECK) {
-        int taglen = (int)strlen(buf) - 9;
+        int taglen = cc - 9 - 2;
         memcpy(tag, &buf[9], taglen);
         tag[taglen] = '\0';
-        printf("%s#\n", tag);
         registerTag(id, tag);
+        busy[id] = false;
     } else if (DEREGISTER_CHECK) {
-        int taglen = (int)strlen(buf) - 11;
+        int taglen = cc - 11 - 2;
         memcpy(tag, &buf[11], taglen);
         tag[taglen] = '\0';
         deregisterTag(id, tag);
-    } else {
+        busy[id] = false;
+    } else
+    if (MSG_CHECK || MSGE_CHECK || IMAGE_CHECK) {
         // MSG, MSGE and IMAGE with tag or without tag
         // these may need a background execution
         LONGREQUEST *req = createLongRequest(id, buf, cc);
@@ -273,36 +280,41 @@ void *handleHeavyRequest(void *ign) {
                 tag[taglen++] = buf[pos];
             tag[taglen] = '\0';
             shift = 1;
+
         } else {
             tag = NULL;
         }
+
 
         // extracing bytecount
         for (pos = pos + shift; buf[pos] != '/'; pos++)
             bytecount = bytecount * 10 + (int) (buf[pos] - '0');
 
+
+        int slash = pos;
         msg = (char*) malloc((pos + bytecount) * sizeof(char));
-        for (i = 0; i <= pos; i++)
+        for (i = 0; i < req -> len; i++)
             msg[i] = buf[i];
 
-        int last = bytecount;
-        while ( (cc = read( ID, buf, min(BUFSIZE, last))) > 0 ) {
-            for (j = 0; j < cc; j++) {
+        int notbytecount = i - slash - 1;
+
+        int last = bytecount - notbytecount;
+        while ( last > 0 ) {
+
+            int cc = read( ID, buf, min(BUFSIZE, last));
+            for (j = 0; j < cc; j++)
                 msg[i++] = buf[j];
-            }
+            last -= cc;
         }
+
+        busy[ID] = false;
+
         msglen = i;
-
-        printf("DEBUG\n");
-        fflush(stdout);
-        int qq;
-        for (qq = 0; qq < msglen; qq++) {
-            printf("%c", msg[qq]);
-            fflush(stdout);
-        }
-
     }
 
+
+    printf("after reading fully %d\n", msglen);
+    fflush(stdout);
 
     /*
         extracted tag and message from requests
@@ -311,7 +323,6 @@ void *handleHeavyRequest(void *ign) {
 
     if (tag != NULL) {
         TAG *cur = tags;
-
         for (; cur != NULL; cur = cur -> next) {
             if (!strcmp(cur -> tag, tag)) {
                 // sending message to all users with such tag
@@ -328,7 +339,6 @@ void *handleHeavyRequest(void *ign) {
     for (i = 0; i < nfds; i++) {
         if (registerAll[i] == 1) {
             LONGWRITE *longwrite = createLongWrite(i, msg, msglen);
-            printf("%s\n", longwrite -> buf);
             pthread_create( &threads[i], NULL, writeLong, (void*) &longwrite);
             pthread_join( threads[i], NULL );
         }
@@ -346,7 +356,6 @@ void *writeLong(void *ign) {
     LONGWRITE *longwrite = *((LONGWRITE**) ign);
 
     int ID = longwrite -> ID;
-
     // mutex on
     pthread_mutex_lock(&mutexes[ID]);
 
@@ -357,6 +366,7 @@ void *writeLong(void *ign) {
     // mutex off
     pthread_mutex_unlock(&mutexes[ID]);
 
+    pthread_exit(NULL);
 }
 
 void registerTag(int ID, char *tag) {
